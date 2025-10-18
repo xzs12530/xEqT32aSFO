@@ -17,42 +17,6 @@ local BOX_TRANSPARENCY = 0.4 -- Para box filled não atrapalhar visão
 local espEnabled = ENABLED_BY_DEFAULT
 local espData = {} -- [player] = { Box, HPBg, HPBar, Billboard }
 
--- Cria BillboardGui com o nome
-local function createBillboard(player)
-	local char = player.Character
-	if not char then return end
-	local head = char:FindFirstChild("Head")
-	if not head then return end
-	if head:FindFirstChild("ESPGui") then return end
-
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "ESPGui"
-	billboard.Adornee = head
-	billboard.AlwaysOnTop = true
-	billboard.Size = UDim2.new(6,0,1.4,0)
-	billboard.StudsOffset = Vector3.new(0,2.6,0)
-	billboard.MaxDistance = MAX_DISTANCE
-	billboard.Parent = head
-
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1,0,1,0)
-	frame.BackgroundTransparency = 1
-	frame.Parent = billboard
-
-	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Size = UDim2.new(1,0,1,0)
-	nameLabel.BackgroundTransparency = 1
-	nameLabel.TextScaled = true
-	nameLabel.Font = Enum.Font.SourceSansBold
-	nameLabel.TextStrokeTransparency = 0.6
-	nameLabel.Text = (player.DisplayName ~= "" and player.DisplayName) or player.Name
-	nameLabel.Parent = frame
-
-	espData[player].Billboard = billboard
-	espData[player].BillboardLabel = nameLabel -- para atualizar RGB
-	return billboard
-end
-
 -- Cria Drawing objects (Box filled + HP background + HP fill)
 local function createDrawingFor(player)
 	if espData[player] and espData[player].Box then
