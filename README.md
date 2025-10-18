@@ -4,35 +4,33 @@ local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
--- == CONFIGURAÇÕES ==
+-- ================== CONFIGURAÇÕES ==================
 local ENABLED_BY_DEFAULT = true
 local SHOW_TEAM_MATES = false
 local MAX_DISTANCE = 300 -- studs
 local BOX_THICKNESS = 1
-local HP_BAR_WIDTH = 1    -- pixels
-local HP_BAR_PADDING = 2  -- distance between box and hp bar (pixels)
--- ======================
+local HP_BAR_WIDTH = 2       -- Barra fina
+local HP_BAR_PADDING = 2     -- Distância da box
+local BOX_TRANSPARENCY = 0.4 -- Para box filled não atrapalhar visão
+-- ===================================================
 
 local espEnabled = ENABLED_BY_DEFAULT
 local espData = {} -- [player] = { Box, HPBg, HPBar, Billboard }
 
--- Cria/atualiza Billboard com o nome (sem barra de vida)
+-- Cria BillboardGui com o nome
 local function createBillboard(player)
 	local char = player.Character
 	if not char then return end
 	local head = char:FindFirstChild("Head")
 	if not head then return end
-
-	-- evita duplicar
-	local exist = head:FindFirstChild("ESPGui")
-	if exist then return exist end
+	if head:FindFirstChild("ESPGui") then return end
 
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "ESPGui"
 	billboard.Adornee = head
 	billboard.AlwaysOnTop = true
 	billboard.Size = UDim2.new(6,0,1.4,0)
-	billboard.StudsOffset = Vector3.new(0, 2.6, 0)
+	billboard.StudsOffset = Vector3.new(0,2.6,0)
 	billboard.MaxDistance = MAX_DISTANCE
 	billboard.Parent = head
 
@@ -47,46 +45,49 @@ local function createBillboard(player)
 	nameLabel.TextScaled = true
 	nameLabel.Font = Enum.Font.SourceSansBold
 	nameLabel.TextStrokeTransparency = 0.6
-	nameLabel.TextColor3 = Color3.new(1,1,1)
 	nameLabel.Text = (player.DisplayName ~= "" and player.DisplayName) or player.Name
 	nameLabel.Parent = frame
 
+	espData[player].Billboard = billboard
+	espData[player].BillboardLabel = nameLabel -- para atualizar RGB
 	return billboard
 end
 
--- Função para criar Drawing objects (Box + HP background + HP fill)
+-- Cria Drawing objects (Box filled + HP background + HP fill)
 local function createDrawingFor(player)
 	if espData[player] and espData[player].Box then
 		return espData[player].Box, espData[player].HPBg, espData[player].HPBar
 	end
 
-	-- Box (outline)
 	local box = Drawing.new("Square")
 	box.Visible = false
 	box.Color = Color3.new(1,1,1)
 	box.Thickness = BOX_THICKNESS
-	box.Filled = false
-	-- HP background (full height)
+	box.Filled = true
+	box.Transparency = BOX_TRANSPARENCY
+
 	local hpBg = Drawing.new("Square")
 	hpBg.Visible = false
 	hpBg.Filled = true
-	hpBg.Size = Vector2.new(HP_BAR_WIDTH, 10) -- height será ajustada por loop
+	hpBg.Size = Vector2.new(HP_BAR_WIDTH, 10)
 	hpBg.Color = Color3.fromRGB(30,30,30)
-	-- HP fill (altura proporcional)
+
 	local hpBar = Drawing.new("Square")
 	hpBar.Visible = false
 	hpBar.Filled = true
 	hpBar.Size = Vector2.new(HP_BAR_WIDTH, 10)
 	hpBar.Color = Color3.new(0,1,0)
 
-	espData[player] = espData[player] or {}
-	espData[player].Box = box
-	espData[player].HPBg = hpBg
-	espData[player].HPBar = hpBar
+	espData[player] = {
+		Box = box,
+		HPBg = hpBg,
+		HPBar = hpBar
+	}
 
 	return box, hpBg, hpBar
 end
 
+-- Limpa ESP de um jogador
 local function clearESP(player)
 	local data = espData[player]
 	if not data then return end
@@ -99,7 +100,7 @@ local function clearESP(player)
 	espData[player] = nil
 end
 
--- Atualiza posição/visual da caixa e da barra lateral baseado no personagem
+-- Atualiza ESP para um jogador
 local function updateForPlayer(player)
 	if not player.Character or not player.Character.Parent then
 		clearESP(player)
@@ -107,23 +108,12 @@ local function updateForPlayer(player)
 	end
 
 	local root = player.Character:FindFirstChild("HumanoidRootPart")
-	if not root then
-		clearESP(player)
-		return
-	end
+	if not root then clearESP(player) return end
 
 	local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
-		clearESP(player)
-		return
-	end
+	if not humanoid then clearESP(player) return end
 
-	-- Team & distance checks
-	if player == LocalPlayer then
-		clearESP(player)
-		return
-	end
-
+	if player == LocalPlayer then clearESP(player) return end
 	if not espEnabled then
 		if espData[player] then
 			if espData[player].Box then espData[player].Box.Visible = false end
@@ -137,30 +127,29 @@ local function updateForPlayer(player)
 	if lpChar and lpChar:FindFirstChild("HumanoidRootPart") then
 		local dist = (lpChar.HumanoidRootPart.Position - root.Position).Magnitude
 		if dist > MAX_DISTANCE then
-			-- fora do alcance
-			if espData[player] and espData[player].Box then espData[player].Box.Visible = false end
-			if espData[player] and espData[player].HPBg then espData[player].HPBg.Visible = false end
-			if espData[player] and espData[player].HPBar then espData[player].HPBar.Visible = false end
+			if espData[player] then
+				espData[player].Box.Visible = false
+				espData[player].HPBg.Visible = false
+				espData[player].HPBar.Visible = false
+			end
 			return
 		end
 	end
 
-	if not SHOW_TEAM_MATES and LocalPlayer.Team and player.Team and LocalPlayer.Team == player.Team then
-		-- teammate e não mostrar
+	local sameTeam = LocalPlayer.Team and player.Team and (LocalPlayer.Team == player.Team)
+	if not SHOW_TEAM_MATES and sameTeam then
 		clearESP(player)
 		return
 	end
 
-	-- cria/billboard se necessário
 	if not (player.Character:FindFirstChild("ESPGui")) then
 		createBillboard(player)
 	end
 
-	-- calcula bounds da personagem em viewport
+	-- calcula bounds
 	local minX, minY = math.huge, math.huge
 	local maxX, maxY = -math.huge, -math.huge
 	local anyOnScreen = false
-
 	for _, part in ipairs(player.Character:GetDescendants()) do
 		if part:IsA("BasePart") then
 			local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
@@ -174,34 +163,34 @@ local function updateForPlayer(player)
 		end
 	end
 
-	-- se nada na tela, esconder
 	if not anyOnScreen then
-		if espData[player] and espData[player].Box then espData[player].Box.Visible = false end
-		if espData[player] and espData[player].HPBg then espData[player].HPBg.Visible = false end
-		if espData[player] and espData[player].HPBar then espData[player].HPBar.Visible = false end
+		if espData[player] then
+			espData[player].Box.Visible = false
+			espData[player].HPBg.Visible = false
+			espData[player].HPBar.Visible = false
+		end
 		return
 	end
 
-	-- evita casos estranhos
-	if minX == math.huge then
-		clearESP(player)
-		return
-	end
+	if minX == math.huge then clearESP(player) return end
 
-	-- cria desenhos se necessário
 	local box, hpBg, hpBar = createDrawingFor(player)
 
-	-- configura box
+	-- Box RGB dinâmica
+	local t = tick() * 2
+	local r = (math.sin(t) * 0.5 + 0.5)
+	local g = (math.sin(t + 2) * 0.5 + 0.5)
+	local b = (math.sin(t + 4) * 0.5 + 0.5)
+	local rgbColor = Color3.new(r,g,b)
+	box.Color = rgbColor
+
 	local boxPos = Vector2.new(minX, minY)
-	local boxSize = Vector2.new(math.max(2, maxX - minX), math.max(2, maxY - minY))
+	local boxSize = Vector2.new(math.max(2,maxX-minX), math.max(2,maxY-minY))
 	box.Position = boxPos
 	box.Size = boxSize
-	-- cor por team
-	local sameTeam = LocalPlayer.Team and player.Team and (LocalPlayer.Team == player.Team)
-	box.Color = sameTeam and Color3.new(0, 1, 1) or Color3.new(1, 0, 0)
 	box.Visible = true
 
-	-- configura HP background (vertical, ao lado direito)
+	-- HP vertical à direita
 	local hpX = boxPos.X + boxSize.X + HP_BAR_PADDING
 	local hpY = boxPos.Y
 	local hpH = boxSize.Y
@@ -209,33 +198,34 @@ local function updateForPlayer(player)
 	hpBg.Size = Vector2.new(HP_BAR_WIDTH, hpH)
 	hpBg.Visible = true
 
-	-- calcula ratio vida
 	local ratio = 1
-	if humanoid and humanoid.MaxHealth and humanoid.MaxHealth > 0 then
+	if humanoid and humanoid.MaxHealth > 0 then
 		ratio = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
 	end
 
-	-- hpBar: preencher de baixo pra cima com altura proporcional
 	local filledHeight = math.max(1, hpH * ratio)
 	hpBar.Size = Vector2.new(HP_BAR_WIDTH, filledHeight)
-	-- posicionar no fundo (baixo) do hpBg
 	hpBar.Position = Vector2.new(hpX, hpY + (hpH - filledHeight))
-	-- cor gradiente simples (verde->amarelo->vermelho)
-	local r,g
+
+	local rr, gg
 	if ratio > 0.5 then
-		r = (1 - ratio) * 2
-		g = 1
+		rr = (1 - ratio) * 2
+		gg = 1
 	else
-		r = 1
-		g = ratio * 2
+		rr = 1
+		gg = ratio * 2
 	end
-	hpBar.Color = Color3.new(r,g,0)
+	hpBar.Color = Color3.new(rr, gg, 0)
 	hpBar.Visible = true
+
+	-- Atualiza cor do Billboard
+	if espData[player].BillboardLabel then
+		espData[player].BillboardLabel.TextColor3 = rgbColor
+	end
 end
 
 -- Loop principal
 RunService.RenderStepped:Connect(function()
-	-- se jogador não tem camera (por segurança)
 	if not Camera then Camera = workspace.CurrentCamera end
 	for _, player in pairs(Players:GetPlayers()) do
 		if player ~= LocalPlayer then
@@ -244,7 +234,7 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
--- Toggle com tecla K também (opcional)
+-- Toggle com tecla K
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then return end
 	if input.KeyCode == Enum.KeyCode.K then
@@ -252,7 +242,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	end
 end)
 
--- Botão arrastável na tela para ligar/desligar
+-- Botão arrastável
 do
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "ESP_Controller"
@@ -276,7 +266,6 @@ do
 		espEnabled = not espEnabled
 		btn.BackgroundColor3 = espEnabled and Color3.fromRGB(0,200,0) or Color3.fromRGB(200,0,0)
 		btn.Text = espEnabled and "ESP: ON" or "ESP: OFF"
-		-- quando desligado, garantir que desenhos fiquem invisíveis
 		if not espEnabled then
 			for p,data in pairs(espData) do
 				if data.Box then data.Box.Visible = false end
@@ -288,18 +277,13 @@ do
 end
 
 -- Cleanup quando jogador sai
-Players.PlayerRemoving:Connect(function(p)
-	clearESP(p)
-end)
+Players.PlayerRemoving:Connect(clearESP)
 
 -- Atualiza displayName quando muda
 Players.PlayerAdded:Connect(function(p)
 	p:GetPropertyChangedSignal("DisplayName"):Connect(function()
-		if p.Character and p.Character:FindFirstChild("ESPGui") then
-			local bb = p.Character:FindFirstChild("ESPGui")
-			if bb and bb:FindFirstChildOfClass("Frame") and bb.Frame:FindFirstChildOfClass("TextLabel") then
-				p.Character.ESPGui.Frame.TextLabel.Text = (p.DisplayName ~= "" and p.DisplayName) or p.Name
-			end
+		if p.Character and p.Character:FindFirstChild("ESPGui") and espData[p] and espData[p].BillboardLabel then
+			p.Character.ESPGui.Frame.TextLabel.Text = (p.DisplayName ~= "" and p.DisplayName) or p.Name
 		end
 	end)
 end)
