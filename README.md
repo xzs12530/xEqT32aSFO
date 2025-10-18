@@ -1,253 +1,178 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
--- ================== CONFIGURAÇÕES ==================
-local ENABLED_BY_DEFAULT = true
-local SHOW_TEAM_MATES = false
-local MAX_DISTANCE = 300 -- studs
-local BOX_THICKNESS = 1
-local HP_BAR_WIDTH = 2       -- Barra fina
-local HP_BAR_PADDING = 2     -- Distância da box
-local BOX_TRANSPARENCY = 0.4 -- Para box filled não atrapalhar visão
--- ===================================================
+-- CONFIGURAÇÕES
+local SHOW_FOR_TEAMMATES = false
+local BOX_TRANSPARENCY = 0.35
+local HEALTHBAR_WIDTH = 5
+local HEALTHBAR_GAP = 3
 
-local espEnabled = ENABLED_BY_DEFAULT
-local espData = {} -- [player] = { Box, HPBg, HPBar, Billboard }
+-- GUI PRINCIPAL
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "DevESP_RGB"
+screenGui.IgnoreGuiInset = true
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
--- Cria Drawing objects (Box filled + HP background + HP fill)
-local function createDrawingFor(player)
-	if espData[player] and espData[player].Box then
-		return espData[player].Box, espData[player].HPBg, espData[player].HPBar
-	end
+-- BOTÃO DE ATIVAÇÃO (ARRASTÁVEL)
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ESP_Toggle"
+toggleBtn.Size = UDim2.new(0, 120, 0, 28)
+toggleBtn.Position = UDim2.new(0, 10, 0, 10)
+toggleBtn.BackgroundColor3 = Color3.new(0, 0, 0)
+toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleBtn.Text = "ESP: ON"
+toggleBtn.Font = Enum.Font.SourceSansBold
+toggleBtn.TextSize = 14
+toggleBtn.AutoButtonColor = false
+toggleBtn.Active = true
+toggleBtn.Draggable = true -- ✅ agora é totalmente arrastável
+toggleBtn.Parent = screenGui
 
-	local box = Drawing.new("Square")
-	box.Visible = false
-	box.Color = Color3.new(1,1,1)
-	box.Thickness = BOX_THICKNESS
-	box.Filled = true
-	box.Transparency = BOX_TRANSPARENCY
+local espEnabled = true
+toggleBtn.MouseButton1Click:Connect(function()
+	espEnabled = not espEnabled
+	toggleBtn.Text = espEnabled and "ESP: ON" or "ESP: OFF"
+end)
 
-	local hpBg = Drawing.new("Square")
-	hpBg.Visible = false
-	hpBg.Filled = true
-	hpBg.Size = Vector2.new(HP_BAR_WIDTH, 10)
-	hpBg.Color = Color3.fromRGB(30,30,30)
+-- CRIAÇÃO DO ESP PARA JOGADOR
+local function createESPFrame(plr)
+	local frame = Instance.new("Frame")
+	frame.Name = "ESP_" .. plr.Name
+	frame.BackgroundTransparency = 1
+	frame.Visible = false
+	frame.Parent = screenGui
 
-	local hpBar = Drawing.new("Square")
-	hpBar.Visible = false
-	hpBar.Filled = true
-	hpBar.Size = Vector2.new(HP_BAR_WIDTH, 10)
-	hpBar.Color = Color3.new(0,1,0)
+	-- Caixa principal translúcida
+	local box = Instance.new("Frame")
+	box.Name = "Box"
+	box.Size = UDim2.new(1, 0, 1, 0)
+	box.BackgroundTransparency = BOX_TRANSPARENCY
+	box.BorderSizePixel = 0
+	box.Parent = frame
 
-	espData[player] = {
+	-- Gradiente fixo (amarelo → roxo → verde)
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 0)),   -- Amarelo topo
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 0, 255)), -- Roxo meio
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 255, 100))    -- Verde base
+	})
+	gradient.Rotation = 90
+	gradient.Parent = box
+
+	local outline = Instance.new("UIStroke")
+	outline.Thickness = 1.4
+	outline.Color = Color3.fromRGB(255, 255, 255)
+	outline.Transparency = 0.4
+	outline.Parent = box
+
+	-- Barra de vida
+	local healthBG = Instance.new("Frame")
+	healthBG.Name = "HealthBG"
+	healthBG.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+	healthBG.BackgroundTransparency = 0.7
+	healthBG.BorderSizePixel = 0
+	healthBG.Parent = box
+
+	local healthBar = Instance.new("Frame")
+	healthBar.Name = "HealthBar"
+	healthBar.BorderSizePixel = 0
+	healthBar.BackgroundColor3 = Color3.fromRGB(255, 105, 180)
+	healthBar.Parent = healthBG
+
+	return {
+		Player = plr,
+		Frame = frame,
 		Box = box,
-		HPBg = hpBg,
-		HPBar = hpBar
+		Gradient = gradient,
+		HealthBG = healthBG,
+		HealthBar = healthBar
 	}
-
-	return box, hpBg, hpBar
 end
 
--- Limpa ESP de um jogador
-local function clearESP(player)
-	local data = espData[player]
-	if not data then return end
-	if data.Box then pcall(function() data.Box:Remove() end) end
-	if data.HPBg then pcall(function() data.HPBg:Remove() end) end
-	if data.HPBar then pcall(function() data.HPBar:Remove() end) end
-	if data.Billboard and data.Billboard.Parent then
-		pcall(function() data.Billboard:Destroy() end)
-	end
-	espData[player] = nil
-end
-
--- Atualiza ESP para um jogador
-local function updateForPlayer(player)
-	if not player.Character or not player.Character.Parent then
-		clearESP(player)
-		return
-	end
-
-	local root = player.Character:FindFirstChild("HumanoidRootPart")
-	if not root then clearESP(player) return end
-
-	local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then clearESP(player) return end
-
-	if player == LocalPlayer then clearESP(player) return end
-	if not espEnabled then
-		if espData[player] then
-			if espData[player].Box then espData[player].Box.Visible = false end
-			if espData[player].HPBg then espData[player].HPBg.Visible = false end
-			if espData[player].HPBar then espData[player].HPBar.Visible = false end
-		end
-		return
-	end
-
-	local lpChar = LocalPlayer.Character
-	if lpChar and lpChar:FindFirstChild("HumanoidRootPart") then
-		local dist = (lpChar.HumanoidRootPart.Position - root.Position).Magnitude
-		if dist > MAX_DISTANCE then
-			if espData[player] then
-				espData[player].Box.Visible = false
-				espData[player].HPBg.Visible = false
-				espData[player].HPBar.Visible = false
-			end
-			return
-		end
-	end
-
-	local sameTeam = LocalPlayer.Team and player.Team and (LocalPlayer.Team == player.Team)
-	if not SHOW_TEAM_MATES and sameTeam then
-		clearESP(player)
-		return
-	end
-
-	if not (player.Character:FindFirstChild("ESPGui")) then
-		createBillboard(player)
-	end
-
-	-- calcula bounds
-	local minX, minY = math.huge, math.huge
-	local maxX, maxY = -math.huge, -math.huge
-	local anyOnScreen = false
-	for _, part in ipairs(player.Character:GetDescendants()) do
-		if part:IsA("BasePart") then
-			local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
-			if onScreen then
-				anyOnScreen = true
-				if pos.X < minX then minX = pos.X end
-				if pos.Y < minY then minY = pos.Y end
-				if pos.X > maxX then maxX = pos.X end
-				if pos.Y > maxY then maxY = pos.Y end
-			end
-		end
-	end
-
-	if not anyOnScreen then
-		if espData[player] then
-			espData[player].Box.Visible = false
-			espData[player].HPBg.Visible = false
-			espData[player].HPBar.Visible = false
-		end
-		return
-	end
-
-	if minX == math.huge then clearESP(player) return end
-
-	local box, hpBg, hpBar = createDrawingFor(player)
-
-	-- Box RGB dinâmica
-	local t = tick() * 2
-	local r = (math.sin(t) * 0.5 + 0.5)
-	local g = (math.sin(t + 2) * 0.5 + 0.5)
-	local b = (math.sin(t + 4) * 0.5 + 0.5)
-	local rgbColor = Color3.new(r,g,b)
-	box.Color = rgbColor
-
-	local boxPos = Vector2.new(minX, minY)
-	local boxSize = Vector2.new(math.max(2,maxX-minX), math.max(2,maxY-minY))
-	box.Position = boxPos
-	box.Size = boxSize
-	box.Visible = true
-
-	-- HP vertical à direita
-	local hpX = boxPos.X + boxSize.X + HP_BAR_PADDING
-	local hpY = boxPos.Y
-	local hpH = boxSize.Y
-	hpBg.Position = Vector2.new(hpX, hpY)
-	hpBg.Size = Vector2.new(HP_BAR_WIDTH, hpH)
-	hpBg.Visible = true
-
-	local ratio = 1
-	if humanoid and humanoid.MaxHealth > 0 then
-		ratio = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
-	end
-
-	local filledHeight = math.max(1, hpH * ratio)
-	hpBar.Size = Vector2.new(HP_BAR_WIDTH, filledHeight)
-	hpBar.Position = Vector2.new(hpX, hpY + (hpH - filledHeight))
-
-	local rr, gg
-	if ratio > 0.5 then
-		rr = (1 - ratio) * 2
-		gg = 1
-	else
-		rr = 1
-		gg = ratio * 2
-	end
-	hpBar.Color = Color3.new(rr, gg, 0)
-	hpBar.Visible = true
-
-	-- Atualiza cor do Billboard
-	if espData[player].BillboardLabel then
-		espData[player].BillboardLabel.TextColor3 = rgbColor
+local espObjects = {}
+for _, p in ipairs(Players:GetPlayers()) do
+	if p ~= LocalPlayer then
+		espObjects[p] = createESPFrame(p)
 	end
 end
 
--- Loop principal
-RunService.RenderStepped:Connect(function()
-	if not Camera then Camera = workspace.CurrentCamera end
-	for _, player in pairs(Players:GetPlayers()) do
-		if player ~= LocalPlayer then
-			pcall(function() updateForPlayer(player) end)
-		end
-	end
-end)
-
--- Toggle com tecla K
-UserInputService.InputBegan:Connect(function(input, processed)
-	if processed then return end
-	if input.KeyCode == Enum.KeyCode.K then
-		espEnabled = not espEnabled
-	end
-end)
-
--- Botão arrastável
-do
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "ESP_Controller"
-	screenGui.ResetOnSpawn = false
-	screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-
-	local btn = Instance.new("TextButton")
-	btn.Name = "ToggleESP"
-	btn.Size = UDim2.new(0, 120, 0, 40)
-	btn.Position = UDim2.new(0.05, 0, 0.2, 0)
-	btn.TextScaled = true
-	btn.Font = Enum.Font.SourceSansBold
-	btn.TextColor3 = Color3.new(1,1,1)
-	btn.Active = true
-	btn.Draggable = true
-	btn.BackgroundColor3 = espEnabled and Color3.fromRGB(0,200,0) or Color3.fromRGB(200,0,0)
-	btn.Text = espEnabled and "ESP: ON" or "ESP: OFF"
-	btn.Parent = screenGui
-
-	btn.MouseButton1Click:Connect(function()
-		espEnabled = not espEnabled
-		btn.BackgroundColor3 = espEnabled and Color3.fromRGB(0,200,0) or Color3.fromRGB(200,0,0)
-		btn.Text = espEnabled and "ESP: ON" or "ESP: OFF"
-		if not espEnabled then
-			for p,data in pairs(espData) do
-				if data.Box then data.Box.Visible = false end
-				if data.HPBg then data.HPBg.Visible = false end
-				if data.HPBar then data.HPBar.Visible = false end
-			end
-		end
-	end)
-end
-
--- Cleanup quando jogador sai
-Players.PlayerRemoving:Connect(clearESP)
-
--- Atualiza displayName quando muda
 Players.PlayerAdded:Connect(function(p)
-	p:GetPropertyChangedSignal("DisplayName"):Connect(function()
-		if p.Character and p.Character:FindFirstChild("ESPGui") and espData[p] and espData[p].BillboardLabel then
-			p.Character.ESPGui.Frame.TextLabel.Text = (p.DisplayName ~= "" and p.DisplayName) or p.Name
-		end
-	end)
+	if p ~= LocalPlayer then
+		espObjects[p] = createESPFrame(p)
+	end
 end)
+
+Players.PlayerRemoving:Connect(function(p)
+	if espObjects[p] then
+		espObjects[p].Frame:Destroy()
+		espObjects[p] = nil
+	end
+end)
+
+-- Cor da barra de vida conforme saúde
+local function getHealthColor(r)
+	if r >= 0.7 then
+		return Color3.fromRGB(255, 105, 180) -- Rosa
+	elseif r >= 0.35 then
+		return Color3.fromRGB(255, 204, 0) -- Amarelo
+	else
+		return Color3.fromRGB(220, 20, 60) -- Vermelho
+	end
+end
+
+-- Atualização da ESP
+RunService.RenderStepped:Connect(function()
+	if not espEnabled then
+		for _, obj in pairs(espObjects) do obj.Frame.Visible = false end
+		return
+	end
+
+	for plr, obj in pairs(espObjects) do
+		local char = plr.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+		if char and hrp and hum and hum.Health > 0 then
+			if not SHOW_FOR_TEAMMATES and plr.Team == LocalPlayer.Team then
+				obj.Frame.Visible = false
+			else
+				local rootPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+				if onScreen then
+					-- Dimensões exatas para R6
+					local height3D, width3D = 5.2, 2
+					local topPos = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, height3D/2, 0))
+					local bottomPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, height3D/2, 0))
+					local boxHeight = math.abs(topPos.Y - bottomPos.Y)
+					local boxWidth = boxHeight / (height3D / width3D)
+
+					obj.Frame.Visible = true
+					obj.Frame.Position = UDim2.new(0, rootPos.X, 0, rootPos.Y)
+					obj.Frame.Size = UDim2.new(0, boxWidth, 0, boxHeight)
+					obj.Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+
+					obj.Box.Size = UDim2.new(1, 0, 1, 0)
+					obj.Box.Position = UDim2.new(0, 0, 0, 0)
+
+					obj.HealthBG.Size = UDim2.new(0, HEALTHBAR_WIDTH, 1, 0)
+					obj.HealthBG.Position = UDim2.new(1, HEALTHBAR_GAP, 0, 0)
+
+					local healthRatio = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+					local color = getHealthColor(healthRatio)
+					obj.HealthBar.BackgroundColor3 = color
+					obj.HealthBar.Size = UDim2.new(1, 0, healthRatio, 0)
+					obj.HealthBar.Position = UDim2.new(0, 0, 1 - healthRatio, 0)
+				else
+					obj.Frame.Visible = false
+				end
+			end
+		else
+			obj.Frame.Visible = false
+		end
+	end
+end)
+
+print("[DevESP_RGB] ESP translúcida com gradiente RGB carregada (R6).")
