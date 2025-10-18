@@ -206,15 +206,14 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	end
 end)
 
--- Botão arrastável melhorado
+-- Botão arrastável
 do
-	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-	local screenGui = playerGui:FindFirstChild("ESP_Controller") or Instance.new("ScreenGui")
+	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "ESP_Controller"
 	screenGui.ResetOnSpawn = false
-	screenGui.Parent = playerGui
+	screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
-	local btn = screenGui:FindFirstChild("ToggleESP") or Instance.new("TextButton")
+	local btn = Instance.new("TextButton")
 	btn.Name = "ToggleESP"
 	btn.Size = UDim2.new(0, 120, 0, 40)
 	btn.Position = UDim2.new(0.05, 0, 0.2, 0)
@@ -227,32 +226,20 @@ do
 	btn.Text = espEnabled and "ESP: ON" or "ESP: OFF"
 	btn.Parent = screenGui
 
-	local function updateButton()
-		btn.BackgroundColor3 = espEnabled and Color3.fromRGB(0,200,0) or Color3.fromRGB(200,0,0)
-		btn.Text = espEnabled and "ESP: ON" or "ESP: OFF"
-	end
-
 	btn.MouseButton1Click:Connect(function()
 		espEnabled = not espEnabled
-		updateButton()
-
-		-- Esconde todos os desenhos se desligado
+		btn.BackgroundColor3 = espEnabled and Color3.fromRGB(0,200,0) or Color3.fromRGB(200,0,0)
+		btn.Text = espEnabled and "ESP: ON" or "ESP: OFF"
 		if not espEnabled then
-			for _, data in pairs(espData) do
+			for p,data in pairs(espData) do
 				if data.Box then data.Box.Visible = false end
 				if data.HPBg then data.HPBg.Visible = false end
 				if data.HPBar then data.HPBar.Visible = false end
 			end
 		end
 	end)
-
-	-- Atualiza visual sempre que a variável mudar
-	task.spawn(function()
-		while task.wait(0.1) do
-			updateButton()
-		end
-	end)
 end
+
 -- Cleanup quando jogador sai
 Players.PlayerRemoving:Connect(clearESP)
 
