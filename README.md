@@ -5,377 +5,420 @@ local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
--- CONFIGURAÇÕES
-local SHOW_FOR_TEAMMATES = false
+-- CONFIG
 local BASE_TRANSPARENCY = 0.25
 local MAX_DISTANCE = 250
-local HEALTHBAR_WIDTH = 5
+local HEALTHBAR_WIDTH = 4
 local HEALTHBAR_GAP = 3
-local TWEEN_TIME = 0.25
+local TWEEN_TIME = 0.20
 
--- GUI
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "DevESP_TeamDynamic"
-screenGui.IgnoreGuiInset = true
-screenGui.ResetOnSpawn = false
-screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-
------------------------------------------------------
--- 🌈 INTERFACE COM TÍTULO + DOIS BOTÕES (ESP + TEAM)
------------------------------------------------------
-
+-- STATE
 local espEnabled = true
 local teamCheckEnabled = false
+local colorMode = "RGB" -- "RGB" or "STEALTH"
 
+-- helpers
+local function safeTween(obj, props, dur, style, dir)
+	dur = dur or TWEEN_TIME
+	style = style or Enum.EasingStyle.Quad
+	dir = dir or Enum.EasingDirection.Out
+	local ok, tween = pcall(function()
+		return TweenService:Create(obj, TweenInfo.new(dur, style, dir), props)
+	end)
+	if ok and tween then
+		tween:Play()
+	end
+end
+
+local function clamp(v, a, b) return math.max(a, math.min(b, v)) end
+
+-- ensure PlayerGui
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- SCREEN GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "KIWI_ESP_UI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = playerGui
+
+-- TWEEN helper for simple calls
 local function tween(obj, props, dur)
-	TweenService:Create(obj, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+	safeTween(obj, props, dur)
 end
 
--- Painel principal
+-- DRAG helper (works mobile & pc)
+local function makeDraggable(frame)
+	local dragging, dragInput, dragStart, startPos
+	frame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragInput = input
+			dragStart = input.Position
+			startPos = frame.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+	frame.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and input == dragInput and dragStart and startPos then
+			local delta = input.Position - dragStart
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+-------------------------
+-- UI: Panel
+-------------------------
 local uiFrame = Instance.new("Frame")
-uiFrame.Name = "ESP_UI_Frame"
-uiFrame.Size = UDim2.new(0, 160, 0, 110)
-uiFrame.Position = UDim2.new(0, 10, 0, 10)
-uiFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-uiFrame.Active = true
-uiFrame.Draggable = false
-uiFrame.ZIndex = 10
+uiFrame.Name = "ESP_Panel"
+uiFrame.Size = UDim2.new(0, 180, 0, 170) -- slightly taller so buttons fit nicely
+uiFrame.Position = UDim2.new(0, 12, 0, 12)
+uiFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+uiFrame.BorderSizePixel = 0
+uiFrame.ZIndex = 50
 uiFrame.Parent = screenGui
+makeDraggable(uiFrame)
 
-local uiCorner = Instance.new("UICorner")
-uiCorner.CornerRadius = UDim.new(0, 10)
-uiCorner.Parent = uiFrame
+local uiCorner = Instance.new("UICorner", uiFrame); uiCorner.CornerRadius = UDim.new(0, 10)
+local uiGradient = Instance.new("UIGradient", uiFrame); uiGradient.Rotation = 45
 
-local glow = Instance.new("ImageLabel")
-glow.Name = "Glow"
-glow.AnchorPoint = Vector2.new(0.5, 0.5)
-glow.Position = UDim2.new(0.5, 0, 0.5, 0)
-glow.Size = UDim2.new(1.4, 0, 1.8, 0)
-glow.Image = "rbxassetid://4996891970"
-glow.ImageTransparency = 0.75
-glow.BackgroundTransparency = 1
-glow.ZIndex = 5
-glow.Parent = uiFrame
-
-local gradient = Instance.new("UIGradient")
-gradient.Rotation = 45
-gradient.Color = ColorSequence.new{
-	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 60, 90)),
-	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 90, 255)),
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 180, 255))
-}
-gradient.Parent = uiFrame
-
--- 🌈 TÍTULO "ESP UNIVERSAL 🥝"
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Name = "TitleLabel"
-titleLabel.Size = UDim2.new(1, 0, 0, 25)
-titleLabel.Position = UDim2.new(0, 0, 0, -2)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "ESP UNIVERSAL 🥝"
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.TextSize = 18
-titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-titleLabel.TextStrokeTransparency = 0.75
-titleLabel.ZIndex = 25
-titleLabel.Parent = uiFrame
-
-local titleGradient = Instance.new("UIGradient")
-titleGradient.Rotation = 45
-titleGradient.Color = ColorSequence.new({
-	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 60, 90)),
-	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 90, 255)),
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 180, 255))
-})
-titleGradient.Parent = titleLabel
-
+-- animated gradient (if RGB mode)
+local stealthSeq = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(120,120,120)), ColorSequenceKeypoint.new(1, Color3.fromRGB(170,170,170))})
 task.spawn(function()
-	while task.wait(0.05) do
-		local t = tick() * 0.25
-		local c1 = Color3.fromHSV(t % 1, 1, 1)
-		local c2 = Color3.fromHSV((t + 0.33) % 1, 1, 1)
-		local c3 = Color3.fromHSV((t + 0.66) % 1, 1, 1)
-		titleGradient.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, c1),
-			ColorSequenceKeypoint.new(0.5, c2),
-			ColorSequenceKeypoint.new(1, c3)
-		})
+	while true do
+		if colorMode == "RGB" then
+			local t = tick() * 0.16
+			local c1 = Color3.fromHSV((t) % 1, 1, 1)
+			local c2 = Color3.fromHSV((t + 0.33) % 1, 1, 1)
+			local c3 = Color3.fromHSV((t + 0.66) % 1, 1, 1)
+			local seq = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, c1),
+				ColorSequenceKeypoint.new(0.5, c2),
+				ColorSequenceKeypoint.new(1, c3)
+			})
+			uiGradient.Color = seq
+		else
+			uiGradient.Color = stealthSeq
+		end
+		task.wait(0.06)
 	end
 end)
 
--- Animação RGB contínua do painel
-task.spawn(function()
-	while task.wait(0.05) do
-		local t = tick() * 0.15
-		local c1 = Color3.fromHSV(t % 1, 1, 1)
-		local c2 = Color3.fromHSV((t + 0.33) % 1, 1, 1)
-		local c3 = Color3.fromHSV((t + 0.66) % 1, 1, 1)
-		gradient.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, c1),
-			ColorSequenceKeypoint.new(0.5, c2),
-			ColorSequenceKeypoint.new(1, c3)
-		})
-		glow.ImageColor3 = c2
-	end
-end)
+-- Title
+local title = Instance.new("TextLabel", uiFrame)
+title.Size = UDim2.new(1, -16, 0, 26)
+title.Position = UDim2.new(0, 8, 0, 6)
+title.BackgroundTransparency = 1
+title.Text = "🥝 KIWI ESP"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.TextColor3 = Color3.fromRGB(255,255,255)
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.ZIndex = 55
 
--- Criador de botões
-local function criarBotao(texto, posY)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 140, 0, 35)
-	btn.Position = UDim2.new(0.5, 0, 0, posY)
-	btn.AnchorPoint = Vector2.new(0.5, 0)
-	btn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	btn.Font = Enum.Font.GothamBold
-	btn.TextSize = 16
-	btn.Text = texto
-	btn.AutoButtonColor = false
-	btn.ZIndex = 20
-	btn.Parent = uiFrame
+-- MINIMIZE button (visible when panel is visible; part of panel so it disappears on minimize)
+local minimizeBtn = Instance.new("TextButton", uiFrame)
+minimizeBtn.Size = UDim2.new(0, 28, 0, 20)
+minimizeBtn.Position = UDim2.new(1, -36, 0, 6)
+minimizeBtn.BackgroundTransparency = 1
+minimizeBtn.Text = "-"
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.TextSize = 20
+minimizeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+minimizeBtn.ZIndex = 56
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = btn
-
-	btn.MouseEnter:Connect(function()
-		tween(btn, {BackgroundColor3 = Color3.fromRGB(45, 45, 60)}, 0.15)
-	end)
-	btn.MouseLeave:Connect(function()
-		tween(btn, {BackgroundColor3 = Color3.fromRGB(30, 30, 40)}, 0.15)
-	end)
-
-	return btn
+-- Buttons layout (stacked vertically)
+local function createButton(text, y)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(0, 156, 0, 36)
+	b.Position = UDim2.new(0, 12, 0, y)
+	b.BackgroundColor3 = Color3.fromRGB(34,34,40)
+	b.BorderSizePixel = 0
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 14
+	b.TextColor3 = Color3.fromRGB(255,255,255)
+	b.Text = text
+	b.ZIndex = 55
+	b.Parent = uiFrame
+	local c = Instance.new("UICorner", b); c.CornerRadius = UDim.new(0,6)
+	b.MouseEnter:Connect(function() tween(b, {BackgroundColor3 = Color3.fromRGB(50,50,60)}, 0.12) end)
+	b.MouseLeave:Connect(function() tween(b, {BackgroundColor3 = Color3.fromRGB(34,34,40)}, 0.12) end)
+	return b
 end
 
-local espBtn = criarBotao("🟢 ESP: ON", 30)
-local teamBtn = criarBotao("👥 Team Check: ON", 70)
+local espBtn = createButton("🟢 ESP: ON", 40)
+local modeBtn = createButton("🎨 Modo: RGB", 82)
+local teamBtn = createButton("👥 Team Check: OFF", 124)
 
-local clickSound = Instance.new("Sound")
+-- small click sound
+local clickSound = Instance.new("Sound", uiFrame)
 clickSound.SoundId = "rbxassetid://9118823104"
 clickSound.Volume = 0.5
-clickSound.PlayOnRemove = true
-clickSound.Name = "ClickSound"
-clickSound.Parent = uiFrame
 
+-------------------------
+-- MINI BALL (appears on minimize)
+-------------------------
+local miniBall = Instance.new("ImageButton")
+miniBall.Name = "MiniKiwi"
+miniBall.Size = UDim2.new(0, 44, 0, 44)
+miniBall.Position = UDim2.new(0, 20, 0, 220) -- lower for mobile reach
+miniBall.BackgroundColor3 = Color3.fromRGB(30,30,36)
+miniBall.BorderSizePixel = 0
+miniBall.Visible = false
+miniBall.ZIndex = 80
+miniBall.Parent = screenGui
+makeDraggable(miniBall)
+local miniCorner = Instance.new("UICorner", miniBall); miniCorner.CornerRadius = UDim.new(1,0)
+
+local miniLabel = Instance.new("TextLabel", miniBall)
+miniLabel.Size = UDim2.new(1,1,1,1)
+miniLabel.BackgroundTransparency = 1
+miniLabel.Text = "🥝"
+miniLabel.Font = Enum.Font.GothamBold
+miniLabel.TextScaled = true
+miniLabel.TextColor3 = Color3.new(1,1,1)
+miniLabel.ZIndex = 85
+
+local miniGradient = Instance.new("UIGradient", miniBall)
+miniGradient.Rotation = 45
+
+local pop = Instance.new("Sound", miniBall)
+pop.SoundId = "rbxassetid://9118823104"
+pop.Volume = 0.6
+
+-- animate mini gradient
+task.spawn(function()
+	while true do
+		if colorMode == "RGB" then
+			local t = tick() * 0.2
+			local c1 = Color3.fromHSV((t) % 1,1,1)
+			local c2 = Color3.fromHSV((t+0.33)%1,1,1)
+			local c3 = Color3.fromHSV((t+0.66)%1,1,1)
+			miniGradient.Color = ColorSequence.new({ColorSequenceKeypoint.new(0,c1), ColorSequenceKeypoint.new(0.5,c2), ColorSequenceKeypoint.new(1,c3)})
+		else
+			miniGradient.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(140,140,140)), ColorSequenceKeypoint.new(1, Color3.fromRGB(180,180,180))})
+		end
+		task.wait(0.06)
+	end
+end)
+
+-- minimize / restore logic
+local minimized = false
+local function minimizePanel()
+	if minimized then return end
+	minimized = true
+	-- shrink panel and hide it (minimizeBtn is part of uiFrame so will hide too)
+	safeTween(uiFrame, {Size = UDim2.new(0, 0, 0, 0)}, 0.18)
+	task.wait(0.18)
+	uiFrame.Visible = false
+	-- show mini ball with bounce
+	miniBall.Size = UDim2.new(0, 0, 0, 0)
+	miniBall.Visible = true
+	safeTween(miniBall, {Size = UDim2.new(0, 48, 0, 48)}, 0.36, Enum.EasingStyle.Back)
+	task.spawn(function() task.wait(0.06); pcall(function() pop:Play() end) end)
+end
+
+local function restorePanel()
+	if not minimized then return end
+	minimized = false
+	miniBall.Visible = false
+	uiFrame.Visible = true
+	safeTween(uiFrame, {Size = UDim2.new(0, 180, 0, 170)}, 0.24, Enum.EasingStyle.Back)
+end
+
+minimizeBtn.MouseButton1Click:Connect(function()
+	minimizePanel()
+end)
+miniBall.MouseButton1Click:Connect(function()
+	restorePanel()
+end)
+
+-------------------------
+-- Buttons behavior
+-------------------------
 espBtn.MouseButton1Click:Connect(function()
 	espEnabled = not espEnabled
 	espBtn.Text = espEnabled and "🟢 ESP: ON" or "🔴 ESP: OFF"
-	local s = clickSound:Clone(); s.Parent = espBtn; s:Destroy()
+	pcall(function() local s = clickSound:Clone(); s.Parent = espBtn; s:Destroy() end)
+end)
+
+modeBtn.MouseButton1Click:Connect(function()
+	if colorMode == "RGB" then
+		colorMode = "STEALTH"
+		modeBtn.Text = "🎨 Modo: Stealth"
+	else
+		colorMode = "RGB"
+		modeBtn.Text = "🎨 Modo: RGB"
+	end
+	pcall(function() local s = clickSound:Clone(); s.Parent = modeBtn; s:Destroy() end)
 end)
 
 teamBtn.MouseButton1Click:Connect(function()
 	teamCheckEnabled = not teamCheckEnabled
-	teamBtn.Text = teamCheckEnabled and "👥 Team Check: OFF" or "👥 Team Check: ON"
-	local s = clickSound:Clone(); s.Parent = teamBtn; s:Destroy()
+	teamBtn.Text = teamCheckEnabled and "👥 Team Check: ON" or "👥 Team Check: OFF"
+	pcall(function() local s = clickSound:Clone(); s.Parent = teamBtn; s:Destroy() end)
 end)
 
------------------------------------------------------
--- 📱 SUPORTE MOBILE (ARRASTAR)
------------------------------------------------------
-local dragging = false
-local dragStart, startPos
+-------------------------
+-- ESP objects
+-------------------------
+local function createESPForPlayer(p)
+	local container = Instance.new("Frame", screenGui)
+	container.Name = "ESP_"..p.Name
+	container.BackgroundTransparency = 1
+	container.Visible = false
+	container.ZIndex = 40
 
-local function updateDrag(input)
-	local delta = input.Position - dragStart
-	uiFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-end
-
-uiFrame.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPos = uiFrame.Position
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				dragging = false
-			end
-		end)
-	end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		updateDrag(input)
-	end
-end)
-
------------------------------------------------------
--- 🧩 ESP VISUAL (mantém seu sistema original)
------------------------------------------------------
-
-local function createESPFrame(plr)
-	local frame = Instance.new("Frame")
-	frame.Name = "ESP_" .. plr.Name
-	frame.BackgroundTransparency = 1
-	frame.Visible = false
-	frame.Parent = screenGui
-
-	local box = Instance.new("Frame")
+	local box = Instance.new("Frame", container)
 	box.Name = "Box"
-	box.Size = UDim2.new(1, 0, 1, 0)
-	box.BackgroundTransparency = BASE_TRANSPARENCY
+	box.Size = UDim2.new(1,0,1,0)
 	box.BorderSizePixel = 0
-	box.Parent = frame
+	box.BackgroundTransparency = BASE_TRANSPARENCY
+	box.Parent = container
 
-	local gradient = Instance.new("UIGradient")
-	gradient.Rotation = 90
-	gradient.Parent = box
+	local grad = Instance.new("UIGradient", box); grad.Rotation = 90
 
-	local healthBG = Instance.new("Frame")
-	healthBG.Name = "HealthBG"
-	healthBG.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-	healthBG.BackgroundTransparency = 0.7
-	healthBG.BorderSizePixel = 0
-	healthBG.Parent = box
+	-- ghost stroke for stealth
+	local stroke = Instance.new("UIStroke", box)
+	stroke.Thickness = 1
+	stroke.Transparency = 0.8
+	stroke.Color = Color3.fromRGB(255,255,255)
 
-	local healthBar = Instance.new("Frame")
-	healthBar.Name = "HealthBar"
-	healthBar.BorderSizePixel = 0
-	healthBar.BackgroundColor3 = Color3.fromRGB(255, 105, 180)
-	healthBar.Size = UDim2.new(1, 0, 1, 0)
-	healthBar.BackgroundTransparency = 0.3
-	healthBar.Parent = healthBG
+	local hbBG = Instance.new("Frame", box)
+	hbBG.Name = "HealthBG"
+	hbBG.BackgroundColor3 = Color3.fromRGB(20,20,20)
+	hbBG.BackgroundTransparency = 0.65
+	hbBG.BorderSizePixel = 0
+	hbBG.ZIndex = 41
+
+	local hb = Instance.new("Frame", hbBG)
+	hb.Name = "HealthBar"
+	hb.BorderSizePixel = 0
+	hb.BackgroundTransparency = 0.3
+	hb.Size = UDim2.new(1,0,1,0)
+	hb.ZIndex = 42
 
 	return {
-		Player = plr,
-		Frame = frame,
+		Player = p,
+		Container = container,
 		Box = box,
-		Gradient = gradient,
-		HealthBG = healthBG,
-		HealthBar = healthBar,
+		Grad = grad,
+		Stroke = stroke,
+		HealthBG = hbBG,
+		HealthBar = hb,
 		LastHealth = 1
 	}
 end
 
 local espObjects = {}
-for _, p in ipairs(Players:GetPlayers()) do
-	if p ~= LocalPlayer then
-		espObjects[p] = createESPFrame(p)
-	end
+for _,p in ipairs(Players:GetPlayers()) do
+	if p ~= LocalPlayer then espObjects[p] = createESPForPlayer(p) end
 end
+Players.PlayerAdded:Connect(function(p) if p~=LocalPlayer then espObjects[p]=createESPForPlayer(p) end end)
+Players.PlayerRemoving:Connect(function(p) if espObjects[p] then espObjects[p].Container:Destroy(); espObjects[p]=nil end end)
 
-Players.PlayerAdded:Connect(function(p)
-	if p ~= LocalPlayer then
-		espObjects[p] = createESPFrame(p)
-	end
-end)
-
-Players.PlayerRemoving:Connect(function(p)
-	if espObjects[p] then
-		espObjects[p].Frame:Destroy()
-		espObjects[p] = nil
-	end
-end)
-
+-- health color helper
 local function getHealthColor(r)
-	if r >= 0.7 then
-		return Color3.fromRGB(255, 105, 180)
-	elseif r >= 0.35 then
-		return Color3.fromRGB(180, 0, 255)
+	if colorMode == "STEALTH" then
+		return Color3.new(1,1,1)
 	else
-		return Color3.fromRGB(0, 170, 255)
+		if r >= 0.7 then return Color3.fromRGB(0,255,0)
+		elseif r >= 0.35 then return Color3.fromRGB(255,255,0)
+		else return Color3.fromRGB(255,0,0) end
 	end
 end
 
-local function getTeamGradient(plr)
-	if not plr.Team then return nil end
-	if string.find(plr.Team.Name:lower(), "red") or string.find(plr.Team.Name:lower(), "vermelh") then
-		return {
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 70, 70)),
-			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 120, 180)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 190, 120))
-		}
-	elseif string.find(plr.Team.Name:lower(), "blue") or string.find(plr.Team.Name:lower(), "azul") then
-		return {
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 180, 255)),
-			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(160, 100, 255)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 255, 255))
-		}
-	end
-	return nil
-end
-
-task.spawn(function()
-	while task.wait(0.05) do
-		for plr, obj in pairs(espObjects) do
-			if obj.Gradient then
-				local custom = getTeamGradient(plr)
-				if custom then
-					obj.Gradient.Color = ColorSequence.new(custom)
-				else
-					local t = tick() * 0.15
-					local c1 = Color3.fromHSV((t) % 1, 1, 1)
-					local c2 = Color3.fromHSV((t + 0.33) % 1, 1, 1)
-					local c3 = Color3.fromHSV((t + 0.66) % 1, 1, 1)
-					obj.Gradient.Color = ColorSequence.new({
-						ColorSequenceKeypoint.new(0, c1),
-						ColorSequenceKeypoint.new(0.5, c2),
-						ColorSequenceKeypoint.new(1, c3)
-					})
-				end
-			end
-		end
-	end
-end)
-
+-- Render loop
 RunService.RenderStepped:Connect(function()
 	if not espEnabled then
-		for _, obj in pairs(espObjects) do obj.Frame.Visible = false end
+		for _,obj in pairs(espObjects) do obj.Container.Visible = false end
 		return
 	end
 
 	for plr, obj in pairs(espObjects) do
 		local char = plr.Character
-		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
-
 		if char and hrp and hum and hum.Health > 0 then
-			if (not teamCheckEnabled and plr.Team == LocalPlayer.Team) then
-				obj.Frame.Visible = false
+			-- team check
+			if teamCheckEnabled and LocalPlayer.Team and plr.Team == LocalPlayer.Team then
+				obj.Container.Visible = false
 			else
-				local rootPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+				local vpPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
 				if onScreen then
 					local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
-					local vis = math.clamp(1 - (dist / MAX_DISTANCE), 0, 1)
+					if dist <= MAX_DISTANCE then
+						-- compute box size (the proportions you liked)
+						local height3D, width3D = 4.5, 1.5
+						local topPos = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, height3D/2, 0))
+						local bottomPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, height3D/2, 0))
+						local boxH = math.max(18, math.abs(topPos.Y - bottomPos.Y))
+						local boxW = math.max(8, boxH / (height3D / width3D))
 
-					local alpha = BASE_TRANSPARENCY + (1 - vis) * 0.3
-					obj.Box.BackgroundTransparency = alpha
-					obj.HealthBar.BackgroundTransparency = 0.3 + (1 - vis) * 0.4
+						obj.Container.Size = UDim2.new(0, boxW, 0, boxH)
+						obj.Container.Position = UDim2.new(0, vpPos.X, 0, vpPos.Y)
+						obj.Container.AnchorPoint = Vector2.new(0.5, 0.5)
+						obj.Container.Visible = true
 
-					local height3D, width3D = 5.2, 2
-					local topPos = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, height3D / 2, 0))
-					local bottomPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, height3D / 2, 0))
-					local boxHeight = math.abs(topPos.Y - bottomPos.Y)
-					local boxWidth = boxHeight / (height3D / width3D)
+						-- color modes
+						if colorMode == "STEALTH" then
+							obj.Box.BackgroundColor3 = Color3.fromRGB(255,255,255)
+							obj.Box.BackgroundTransparency = 0.62
+							-- stronger stroke in stealth for that ghost outline
+							obj.Stroke.Transparency = 0.75
+							obj.Stroke.Color = Color3.fromRGB(255,255,255)
+							obj.Grad.Color = ColorSequence.new({
+								ColorSequenceKeypoint.new(0, Color3.fromRGB(250,250,250)),
+								ColorSequenceKeypoint.new(1, Color3.fromRGB(245,245,245))
+							})
+						else
+							-- animated RGB gradient
+							local t = tick() * 0.18
+							local c1 = Color3.fromHSV((t) % 1, 1, 1)
+							local c2 = Color3.fromHSV((t + 0.33) % 1, 1, 1)
+							local c3 = Color3.fromHSV((t + 0.66) % 1, 1, 1)
+							obj.Grad.Color = ColorSequence.new({
+								ColorSequenceKeypoint.new(0, c1),
+								ColorSequenceKeypoint.new(0.5, c2),
+								ColorSequenceKeypoint.new(1, c3)
+							})
+							obj.Box.BackgroundTransparency = BASE_TRANSPARENCY
+							-- make stroke subtle in RGB
+							obj.Stroke.Transparency = 0.95
+						end
 
-					obj.Frame.Visible = true
-					obj.Frame.Position = UDim2.new(0, rootPos.X, 0, rootPos.Y)
-					obj.Frame.Size = UDim2.new(0, boxWidth, 0, boxHeight)
-					obj.Frame.AnchorPoint = Vector2.new(0.5, 0.5)
-
-					local barWidth = math.clamp(HEALTHBAR_WIDTH * vis + 1.5, 1.5, HEALTHBAR_WIDTH)
-					obj.HealthBG.Size = UDim2.new(0, barWidth, 1, 0)
-					obj.HealthBG.Position = UDim2.new(1, HEALTHBAR_GAP, 0, 0)
-
-					local healthRatio = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
-					if math.abs(healthRatio - obj.LastHealth) > 0.01 then
-						local color = getHealthColor(healthRatio)
-						obj.LastHealth = healthRatio
-						TweenService:Create(obj.HealthBar, TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-							Size = UDim2.new(1, 0, healthRatio, 0),
-							Position = UDim2.new(0, 0, 1 - healthRatio, 0),
-							BackgroundColor3 = color
-						}):Play()
+						-- health bar: always set color immediately (avoid white flash)
+						local healthRatio = clamp(hum.Health / hum.MaxHealth, 0, 1)
+						local col = getHealthColor(healthRatio)
+						-- immediate color set to avoid color flicker
+						obj.HealthBar.BackgroundColor3 = col
+						-- tween size/position for smoothness
+						safeTween(obj.HealthBar, {Size = UDim2.new(1,0,healthRatio,0), Position = UDim2.new(0,0,1-healthRatio,0)}, 0.14, Enum.EasingStyle.Quad)
+						-- health background size
+						local barW = clamp(HEALTHBAR_WIDTH * clamp(1 - (dist / MAX_DISTANCE), 0, 1) + 1.2, 1.2, HEALTHBAR_WIDTH)
+						obj.HealthBG.Size = UDim2.new(0, barW, 1, 0)
+						obj.HealthBG.Position = UDim2.new(1, HEALTHBAR_GAP, 0, 0)
+					else
+						obj.Container.Visible = false
 					end
 				else
-					obj.Frame.Visible = false
+					obj.Container.Visible = false
 				end
 			end
 		else
-			obj.Frame.Visible = false
+			obj.Container.Visible = false
 		end
 	end
 end)
 
-print("[ESP UNIVERSAL 🥝] ✅ Interface carregada com sucesso!")
+print("[KIWI ESP] Final script loaded.")
